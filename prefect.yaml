@@ -1,0 +1,82 @@
+# Prefect deployment configuration for the 10x-import project
+# This file defines how to build, push, and deploy flows for copying 10x genomics data blobs
+# between Azure storage accounts using Prefect.
+
+# Project metadata
+name: 10x-import
+prefect-version: 3.3.4
+
+# Build section: build docker image for this project
+build:
+  - prefect_docker.deployments.steps.build_docker_image:
+      image_name: bccrcprccc1cr.azurecr.io/10x-import/default
+      dockerfile: auto
+      tag: v1.0.0
+
+# Push section: push docker image to container registry
+  - prefect_docker.deployments.steps.push_docker_image:
+      image_name: bccrcprccc1cr.azurecr.io/10x-import/default
+      tag: v1.0.0
+
+# Pull section: clone this repository for remote execution
+pull:
+  - prefect.deployments.steps.git_clone:
+      repository: https://github.com/molonc/10x-import.git
+      credentials: "{{ prefect.blocks.github-credentials.my-credentials }}"
+
+# Deployments section: configure flow deployment for 10x-import
+# This deployment copies 10x genomics data from the SCRNA storage account to the ATLAS storage account.
+deployments:
+  - name: 10x-import
+    version: null
+    tags: []
+    concurrency_limit: null
+    description: |-
+      Copies 10x genomics data blobs from the SCRNA storage account to the ATLAS storage account.
+      The source and destination blob URLs are defined in a JSON file.
+      This flow iterates through the JSON and copies blobs from the source storage account (SCRNA_STORAGE)
+      to the destination storage account (ATLAS_STORAGE).
+
+      Environment Variables Required:
+          ATLAS_STORAGE_CONNECTION_STRING: Connection string for the destination storage account.
+          SCRNA_STORAGE_CONNECTION_STRING: Connection string for the source storage account.
+          DROPBOX_URL: Destination base URL for copied blobs.
+          SCRNA_URL: Source base URL for blobs to copy.
+          SOURCE_JSON_FILEPATH: Path to the JSON file listing blobs to copy.
+    entrypoint: 10x_import.py:copy_10x
+    parameters: {}
+    work_pool:
+      name: aks-pool
+      work_queue_name: 10x-import
+      job_variables:
+        image: bccrcprccc1cr.azurecr.io/10x-import/default:v1.0.0
+        env:
+          SCRNA_STORAGE_CONNECTION_STRING: "{{ prefect.blocks.secret.scrna-storage-connection-string }}"
+          SCRNA_URL: "{{ prefect.blocks.secret.scrna-url }}"
+          ATLAS_STORAGE_CONNECTION_STRING: "{{ prefect.blocks.secret.atlas-storage-connection-string }}"
+          DROPBOX_URL: "{{ prefect.blocks.secret.dropbox-url }}"
+          SOURCE_JSON_FILEPATH: "{{ prefect.blocks.secret.source-json-filepath }}"
+        # Network resilience settings
+        # Try 3 times if the job fails due to network issues
+        retries: 3
+        retry_delay_seconds: 30
+        # Increase timeouts to handle large files and connection delays
+        stream_output: true
+        infrastructure_overrides:
+          kubernetes:
+            pod:
+              spec:
+                containers:
+                  - name: prefect
+                    resources:
+                      limits:
+                        memory: "1Gi"
+                      requests:
+                        memory: "512Mi"
+                    env:
+                      - name: PYTHONUNBUFFERED
+                        value: "1"
+                      - name: AZURE_CONNECTION_VERIFY
+                        value: "true"
+                      - name: REQUESTS_CA_BUNDLE
+                        value: "/etc/ssl/certs/ca-certificates.crt"
