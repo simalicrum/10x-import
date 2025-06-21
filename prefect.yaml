@@ -21,7 +21,7 @@ build:
 # Pull section: clone this repository for remote execution
 pull:
   - prefect.deployments.steps.git_clone:
-      repository: https://github.com/molonc/10x-import.git
+      repository: https://github.com/simalicrum/10x-import.git
       credentials: "{{ prefect.blocks.github-credentials.my-credentials }}"
 
 # Deployments section: configure flow deployment for 10x-import
@@ -47,7 +47,7 @@ deployments:
     parameters: {}
     work_pool:
       name: aks-pool
-      work_queue_name: 10x-import
+      work_queue_name: default
       job_variables:
         image: bccrcprccc1cr.azurecr.io/10x-import/default:v1.0.0
         env:

@@ -14,6 +14,7 @@ Environment variables required:
 
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone  # For SAS token expiry
 from urllib.parse import urlparse
 
@@ -43,7 +44,7 @@ with open(SOURCE_JSON_FILEPATH) as f:
     data = json.load(f)
 
 
-@task
+@task(tags=["copy_blob"], retries=3, retry_delay_seconds=10)
 def copy_blob(source, destination):
     """
     Copy a blob from the source URL to the destination URL using Azure Blob Storage SDK.
@@ -95,8 +96,28 @@ def copy_blob(source, destination):
     # Construct the source URL with SAS token
     source_url_with_sas = f"{source_blob_client.url}?{sas_token}"
 
-    # Upload the blob from the source URL to the destination
-    destination_blob_client.upload_blob_from_url(source_url_with_sas, overwrite=True)
+    # Upload the blob from the source URL to the destination using server-side copy
+    copy_id = destination_blob_client.start_copy_from_url(source_url_with_sas)
+    logger.info(f"Started copy operation with copy_id: {copy_id}")
+
+    # Wait for the copy to complete
+
+    while True:
+        props = destination_blob_client.get_blob_properties()
+        status = props.copy.status
+        logger.info(f"Copy status for {destination_blob_client.blob_name}: {status}")
+        if status == "success":
+            logger.info(f"Copy completed for {destination_blob_client.blob_name}")
+            break
+        elif status == "pending":
+            time.sleep(5)
+        else:
+            logger.error(
+                f"Copy failed for {destination_blob_client.blob_name} with status: {status}"
+            )
+            raise Exception(
+                f"Copy failed for {destination_blob_client.blob_name} with status: {status}"
+            )
 
 
 @flow
